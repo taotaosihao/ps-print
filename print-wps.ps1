@@ -143,7 +143,11 @@ catch {
 }
 finally {
     if ($doc) {
-        $doc.Close()
+        if ($appType.type -eq "Excel") {
+            $doc.Close($false)  # False means don't save changes
+        } else {
+            $doc.Close(0)  # wdDoNotSaveChanges = 0 for Word documents
+        }
     }
     if ($wps) {
         $wps.Quit()
