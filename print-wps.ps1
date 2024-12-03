@@ -142,17 +142,29 @@ catch {
     exit 1
 }
 finally {
-    if ($doc) {
-        if ($appType.type -eq "Excel") {
-            $doc.Close($false)  # False means don't save changes
-        } else {
-            $doc.Close(0)  # wdDoNotSaveChanges = 0 for Word documents
+    try {
+        if ($doc) {
+            if ($appType.type -eq "Excel") {
+                $doc.Saved = $true  # Prevent save prompt
+                $doc.Close()
+            } else {
+                $doc.Saved = $true  # Prevent save prompt
+                $doc.Close()
+            }
+            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($doc) | Out-Null
+            $doc = $null
+        }
+        if ($wps) {
+            $wps.Quit()
+            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($wps) | Out-Null
+            $wps = $null
         }
     }
-    if ($wps) {
-        $wps.Quit()
-        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($wps) | Out-Null
+    catch {
+        Write-Warning "Error during cleanup: $_"
     }
-    [System.GC]::Collect()
-    [System.GC]::WaitForPendingFinalizers()
+    finally {
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+    }
 }
