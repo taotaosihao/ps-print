@@ -3,7 +3,7 @@ param(
     [string]$FilePath,
     [string]$PrinterName = $null,
     [ValidateSet("A4", "Letter", "Legal", "A3")]
-    [string]$PageSize = "A4",
+    [string]$PageSize = $null,
     [ValidateSet("Portrait", "Landscape")]
     [string]$Orientation = "Portrait",
     [string]$WpsDir,
@@ -114,21 +114,25 @@ try {
         foreach ($sheet in $doc.Worksheets) {
             $sheet.PageSetup.Orientation = if ($Orientation -eq "Landscape") { 2 } else { 1 }
             
-            switch ($PageSize) {
-                "A4" { $sheet.PageSetup.PaperSize = 9 }
-                "Letter" { $sheet.PageSetup.PaperSize = 1 }
-                "Legal" { $sheet.PageSetup.PaperSize = 5 }
-                "A3" { $sheet.PageSetup.PaperSize = 8 }
+            if ($PageSize) {
+                switch ($PageSize) {
+                    "A4" { $sheet.PageSetup.PaperSize = 9 }
+                    "Letter" { $sheet.PageSetup.PaperSize = 1 }
+                    "Legal" { $sheet.PageSetup.PaperSize = 5 }
+                    "A3" { $sheet.PageSetup.PaperSize = 8 }
+                }
             }
         }
     } else {
         $doc.PageSetup.Orientation = if ($Orientation -eq "Landscape") { 1 } else { 0 }
         
-        switch ($PageSize) {
-            "A4" { $doc.PageSetup.PaperSize = 9 }
-            "Letter" { $doc.PageSetup.PaperSize = 1 }
-            "Legal" { $doc.PageSetup.PaperSize = 5 }
-            "A3" { $doc.PageSetup.PaperSize = 8 }
+        if ($PageSize) {
+            switch ($PageSize) {
+                "A4" { $doc.PageSetup.PaperSize = 9 }
+                "Letter" { $doc.PageSetup.PaperSize = 1 }
+                "Legal" { $doc.PageSetup.PaperSize = 5 }
+                "A3" { $doc.PageSetup.PaperSize = 8 }
+            }
         }
     }
 
