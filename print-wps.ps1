@@ -107,8 +107,20 @@ try {
     }
 
     # Configure printer settings
-    $wps.ActivePrinter = if ($PrinterName) { $PrinterName } else { $wps.ActivePrinter }
-    
+    if ($PrinterName) {
+        if ($appType.type -eq "Excel") {
+            $printer = Get-CimInstance -ClassName Win32_Printer -Filter "Name='$PrinterName'"
+            if ($null -eq $printer) {
+                throw "Printer '$PrinterName' not found."
+            }
+            Invoke-CimMethod -InputObject $printer -MethodName SetDefaultPrinter
+            Write-Host "Default printer set to '$PrinterName'"
+        }
+        else {
+            $wps.ActivePrinter = $PrinterName
+        }
+    }
+
     # Set page orientation and size based on document type
     if ($appType.type -eq "Excel") {
         foreach ($sheet in $doc.Worksheets) {
