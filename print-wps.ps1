@@ -2,7 +2,6 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$FilePath,
     [string]$PrinterName = $null,
-    [ValidateSet("A4", "Letter", "Legal", "A3")]
     [string]$PageSize = $null,
     [ValidateSet("Portrait", "Landscape")]
     [string]$Orientation = "Portrait",
@@ -30,6 +29,38 @@ function Get-WpsPath {
         }
     }
     return $null
+}
+
+# Function to get printer pages by page size
+function Get-PrinterPagesBySize {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$PrinterName,
+        [Parameter(Mandatory=$true)]
+        [string]$PageSize
+    )
+    
+    try {
+        $printer = Get-CimInstance -Class Win32_Printer -Filter "Name='$PrinterName'"
+        if (-not $printer) {
+            throw "Printer '$PrinterName' not found"
+        }
+
+        $paperSizes = $printer.PaperSizesSupported
+        $paperNames = $printer.PrinterPaperNames
+
+        for ($i = 0; $i -lt $paperSizes.Count; $i++) {
+            if ($paperNames[$i] -eq $PageSize) {
+                Write-Host "Printer '$PrinterName' supports page size '$PageSize'"
+                return $paperSizes[$i]
+            }
+        }
+
+        throw "Page size '$PageSize' not supported by printer '$PrinterName'"
+    }
+    catch {
+        throw $_
+    }
 }
 
 # Check if the file exists
@@ -121,30 +152,23 @@ try {
         }
     }
 
+    if ($PageSize) {
+        $PageSize = Get-PrinterPagesBySize -PrinterName $PrinterName -PageSize $PageSize
+    }
     # Set page orientation and size based on document type
     if ($appType.type -eq "Excel") {
         foreach ($sheet in $doc.Worksheets) {
             $sheet.PageSetup.Orientation = if ($Orientation -eq "Landscape") { 2 } else { 1 }
             
             if ($PageSize) {
-                switch ($PageSize) {
-                    "A4" { $sheet.PageSetup.PaperSize = 9 }
-                    "Letter" { $sheet.PageSetup.PaperSize = 1 }
-                    "Legal" { $sheet.PageSetup.PaperSize = 5 }
-                    "A3" { $sheet.PageSetup.PaperSize = 8 }
-                }
+                $sheet.PageSetup.PaperSize = $PageSize
             }
         }
     } else {
         $doc.PageSetup.Orientation = if ($Orientation -eq "Landscape") { 1 } else { 0 }
         
         if ($PageSize) {
-            switch ($PageSize) {
-                "A4" { $doc.PageSetup.PaperSize = 9 }
-                "Letter" { $doc.PageSetup.PaperSize = 1 }
-                "Legal" { $doc.PageSetup.PaperSize = 5 }
-                "A3" { $doc.PageSetup.PaperSize = 8 }
-            }
+            $doc.PageSetup.PaperSize = $PageSize
         }
     }
 
