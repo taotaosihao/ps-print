@@ -8,7 +8,7 @@ param(
     [string]$WpsDir,
     [switch]$Force
 )
-
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 # Function to get WPS Office path from registry
 function Get-WpsPath {
     $registryPaths = @(
@@ -31,38 +31,96 @@ function Get-WpsPath {
     return $null
 }
 
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public class PrinterInfo
+{
+    [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int DeviceCapabilities(
+        string lpDeviceName,
+        string lpPort,
+        short fwCapability,
+        IntPtr lpOutput,
+        IntPtr lpDevMode);
+
+    // Constants for DeviceCapabilities
+    public const short DC_PAPERS = 2;
+    public const short DC_PAPERNAMES = 3;
+    public const short DC_PAPERSIZE = 4;
+}
+"@
+
 # Function to get printer pages by page size
-function Get-PrinterPagesBySize {
-    param(
+function Get-PrinterPaperBySize  {
+    param (
         [Parameter(Mandatory=$true)]
         [string]$PrinterName,
         [Parameter(Mandatory=$true)]
-        [string]$PageSize
+        [string]$PaperSize
     )
-    
-    try {
-        $printer = Get-CimInstance -Class Win32_Printer -Filter "Name='$PrinterName'"
-        if (-not $printer) {
-            throw "Printer '$PrinterName' not found"
-        }
 
-        $paperSizes = $printer.PaperSizesSupported
-        $paperNames = $printer.PrinterPaperNames
-
-        for ($i = 0; $i -lt $paperSizes.Count; $i++) {
-            if ($paperNames[$i] -eq $PageSize) {
-                Write-Host "Printer '$PrinterName' supports page size '$PageSize'"
-                return $paperSizes[$i]
-            }
-        }
-
-        throw "Page size '$PageSize' not supported by printer '$PrinterName'"
+    # Get the printer port
+    $printer = Get-CimInstance -Class Win32_Printer | Where-Object { $_.Name -eq $PrinterName }
+    if (-not $printer) {
+        Write-Error "Printer '$PrinterName' not found."
+        return
     }
-    catch {
-        throw $_
+    $port = $printer.PortName
+
+    # Get count of supported paper types
+    $count = [PrinterInfo]::DeviceCapabilities($PrinterName, $port, [PrinterInfo]::DC_PAPERS, [IntPtr]::Zero, [IntPtr]::Zero)
+    
+    if ($count -le 0) {
+        Write-Error "Failed to get paper sizes. Error code: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+        return
+    }
+
+    $paperNames = $printer.PrinterPaperNames
+    # Allocate memory for paper IDs
+    $paperIdsPtr = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($count * 2)  # short is 2 bytes
+    $paperNamesPtr = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($count * 64)  # Each paper name is 64 bytes
+    # $paperSizePtr = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($count * 8)  # POINT structure is 8 bytes
+
+    try {
+        # Get paper IDs
+        [PrinterInfo]::DeviceCapabilities($PrinterName, $port, [PrinterInfo]::DC_PAPERS, $paperIdsPtr, [IntPtr]::Zero)
+        
+        # Get paper names
+        [PrinterInfo]::DeviceCapabilities($PrinterName, $port, [PrinterInfo]::DC_PAPERNAMES, $paperNamesPtr, [IntPtr]::Zero)
+        
+        # Get paper sizes
+        # [PrinterInfo]::DeviceCapabilities($PrinterName, $port, [PrinterInfo]::DC_PAPERSIZE, $paperSizePtr, [IntPtr]::Zero)
+
+        $results = @()
+        
+        for ($i = 0; $i -lt $count; $i++) {
+            $paperId = [System.Runtime.InteropServices.Marshal]::ReadInt16($paperIdsPtr, ($i * 2))
+            # $paperName = [System.Runtime.InteropServices.Marshal]::PtrToStringUni(
+            #                     [System.IntPtr]::Add($paperNamesPtr, ($i * 64)), 32)
+            $paperName = $paperNames[$i]
+            if ($paperNames[$i] -eq $PaperSize) {
+                return [PSCustomObject]@{
+                    PaperId = $paperId
+                    PaperName = $paperName
+                } 
+            }
+            # $results += [PSCustomObject]@{
+            #     PaperId = $paperId
+            #     PaperName = $paperName
+            # }
+        }
+
+        return $results
+    }
+    finally {
+        # Free allocated memory
+        [System.Runtime.InteropServices.Marshal]::FreeHGlobal($paperIdsPtr)
+        [System.Runtime.InteropServices.Marshal]::FreeHGlobal($paperNamesPtr)
+        # [System.Runtime.InteropServices.Marshal]::FreeHGlobal($paperSizePtr)
     }
 }
-
 # Check if the file exists
 if (-not (Test-Path $FilePath)) {
     Write-Error "File not found: $FilePath"
@@ -152,23 +210,26 @@ try {
         }
     }
 
+    $realPaperSize = $null
     if ($PageSize) {
-        $PageSize = Get-PrinterPagesBySize -PrinterName $PrinterName -PageSize $PageSize
+        $realPaperSize = Get-PrinterPaperBySize -PrinterName $PrinterName -PaperSize $PageSize
+        Write-Host "Printer '$PrinterName' supports page size '$($realPaperSize.PaperId)'"
     }
+
     # Set page orientation and size based on document type
     if ($appType.type -eq "Excel") {
         foreach ($sheet in $doc.Worksheets) {
             $sheet.PageSetup.Orientation = if ($Orientation -eq "Landscape") { 2 } else { 1 }
             
-            if ($PageSize) {
-                $sheet.PageSetup.PaperSize = $PageSize
+            if ($realPaperSize) {
+                $sheet.PageSetup.PaperSize = $realPaperSize.PaperId
             }
         }
     } else {
         $doc.PageSetup.Orientation = if ($Orientation -eq "Landscape") { 1 } else { 0 }
         
-        if ($PageSize) {
-            $doc.PageSetup.PaperSize = $PageSize
+        if ($realPaperSize) {
+            $doc.PageSetup.PaperSize = $realPaperSize.PaperId
         }
     }
 
